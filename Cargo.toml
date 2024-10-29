@@ -1,0 +1,23 @@
+[package]
+name = "cando"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.91"
+cursor = "2.3.0"
+futures = "0.3.31"
+named-lock = "0.4.1"
+rattler = "0.27.16"
+rattler_conda_types = "0.28.3"
+rattler_lock = "0.22.28"
+rattler_package_streaming = "0.22.10"
+reqwest = "0.12.8"
+serde = { version = "1.0.213", features = ["derive"] }
+serde_yaml = "0.9.34"
+sha256 = "1.5.0"
+tokio = { version = "1.41.0", features = ["fs", "macros", "rt", "rt-multi-thread"] }
+tokio-retry = "0.3.0"
+tracing = "0.1.40"
+tracing-subscriber = "0.3.18"
+url = "2.5.2"
