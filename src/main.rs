@@ -66,7 +66,7 @@ async fn download_pkg(
     }
 }
 
-fn hash_conda_pkgs(pkgs: &Vec<CondaPkg>) -> String {
+fn hash_conda_pkgs(pkgs: &[CondaPkg]) -> String {
     // Hash all the pkgs to create a unique hash for the env, `get_conda_pkgs_from_lockfile` also sorts the list
     // so hashes won't change due to changes in ordering in the lockfile
     let accum_hash = pkgs
@@ -166,7 +166,7 @@ fn get_conda_pkgs_from_lockfile(
 
 fn get_info_from_cando_file(cando_file_path: &Path) -> anyhow::Result<(PathBuf, PathBuf)> {
     let Schema { lockfile, cache }: Schema = {
-        let content = std::fs::read_to_string(&cando_file_path)?;
+        let content = std::fs::read_to_string(cando_file_path)?;
         serde_yaml::from_str(&content)?
     };
 
@@ -225,7 +225,7 @@ async fn run_cando(mut args: ArgsOs) -> anyhow::Result<()> {
         ));
     }
 
-    return Ok(());
+    Ok(())
 }
 
 #[tokio::main]
