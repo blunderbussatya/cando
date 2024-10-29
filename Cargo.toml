@@ -2,6 +2,9 @@
 name = "cando"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
+repository = "https://github.com/satyajeet104/cando"
+authors = ["Satyajeet Singh <satyajeet104@gmail.com>"]
 
 [dependencies]
 anyhow = "1.0.91"
@@ -29,15 +32,19 @@ lto = "thin"
 strip = true
 codegen-units = 1
 
-# Config for 'cargo dist'
+# Config for 'dist'
 [workspace.metadata.dist]
-# The preferred cargo-dist version to use in CI (Cargo.toml SemVer syntax)
-cargo-dist-version = "0.0.7"
+# The preferred dist version to use in CI (Cargo.toml SemVer syntax)
+cargo-dist-version = "0.24.0"
 # The preferred Rust toolchain to use in CI (rustup toolchain syntax)
 rust-toolchain-version = "1.67.1"
-# CI backends to support (see 'cargo dist generate-ci')
-ci = ["github"]
+# CI backends to support
+ci = "github"
 # The installers to generate for each app
 installers = ["shell"]
 # Target platforms to build apps for (Rust target-triple syntax)
-targets = ["x86_64-unknown-linux-musl", "x86_64-unknown-linux-gnu", "x86_64-apple-darwin", "x86_64-pc-windows-msvc", "aarch64-apple-darwin"]
+targets = ["aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-unknown-linux-gnu", "x86_64-unknown-linux-musl", "x86_64-pc-windows-msvc"]
+# Path that installers should place binaries in
+install-path = "CARGO_HOME"
+# Whether to install an updater program
+install-updater = false
