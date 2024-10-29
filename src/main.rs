@@ -13,6 +13,7 @@ use tracing::{debug, Level};
 const DEFAULT_FILE_PERMISSIONS: u32 = 0o550;
 const LOCK_FILE_NAME: &str = "__CANDO_LOCK__";
 const SUCCESS_MARKER_NAME: &str = "__CANDO_SUCCESS_MARKER__";
+// TODO(SS): Make them configurable?
 const ENV_DIR_NAME: &str = "__ENV__";
 const EXPONENTIAL_BACKOFF_BASE_MILLIS: u64 = 100;
 const NUM_RETRIES: usize = 5;
