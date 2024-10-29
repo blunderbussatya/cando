@@ -21,8 +21,9 @@ const DEFAULT_CACHE_NAME: &str = ".cando_cache";
 
 #[derive(Debug, Deserialize)]
 struct Schema {
-    // Relative path to lockfile
+    /// Relative path to lockfile
     lockfile: PathBuf,
+    /// Optinally cache path can be defined, default path is $HOME/.cando_cache
     cache: Option<PathBuf>,
 }
 
@@ -244,3 +245,5 @@ async fn main() -> anyhow::Result<()> {
     let args = std::env::args_os();
     run_cando(args).await
 }
+
+// TODO(SS): Add tests
