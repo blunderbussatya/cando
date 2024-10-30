@@ -1,6 +1,5 @@
 #!/usr/bin/env cando
 
-lockfile_path: example/my_env/env-lock.yaml
 inlined_conda_pkgs:
   hash: 7ca536558f6b8bfd9d39a2d7ff2d21b95fa71e4f9bd59d318a10ce71eb892394
   conda_pkgs:

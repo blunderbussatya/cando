@@ -331,7 +331,13 @@ fn handle_cli(cli: Cli) -> anyhow::Result<()> {
         }) => {
             let conda_pkgs = get_conda_pkgs_from_lockfile(&lockfile)?;
             let hash = hash_conda_pkgs(&conda_pkgs);
-            let lockfile_path = Some(lockfile);
+            let lockfile_path = {
+                if inline {
+                    None
+                } else {
+                    Some(lockfile)
+                }
+            };
             let inlined_conda_pkgs = {
                 if inline {
                     Some(InlinedCondaPkgs { hash, conda_pkgs })
