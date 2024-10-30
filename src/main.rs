@@ -53,7 +53,7 @@ impl Schema {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 struct CondaPkg {
     name: String,
     url: url::Url,
@@ -400,4 +400,51 @@ async fn main() -> anyhow::Result<()> {
     run_cando(args).await
 }
 
-// TODO(SS): Add tests
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_schema() {
+        let valid_schema = Schema {
+            lockfile_path: Some("test_lockfile".into()),
+            cache: None,
+            inlined_conda_pkgs: None,
+        };
+        assert!(
+            valid_schema.validate_schema().is_ok(),
+            "Schema validation should succeed"
+        );
+
+        let invalid_schema = Schema {
+            lockfile_path: None,
+            cache: None,
+            inlined_conda_pkgs: None,
+        };
+        assert!(
+            invalid_schema.validate_schema().is_err(),
+            "Schema validation should fail"
+        );
+    }
+
+    #[test]
+    fn misc_test() {
+        let lockfile_path = Path::new("example/my_env/env-lock.yaml");
+        let pkgs = get_conda_pkgs_from_lockfile(&lockfile_path).unwrap();
+        let exp_hash = "7ca536558f6b8bfd9d39a2d7ff2d21b95fa71e4f9bd59d318a10ce71eb892394";
+        // hashing function checks
+        assert_eq!(hash_conda_pkgs(&pkgs), exp_hash);
+        // Test for file with relative lockfiles
+        let rg = Path::new("example/rg");
+        let (cache_path, cp) = get_info_from_cando_file(rg).unwrap();
+        assert_eq!(cache_path.file_name().unwrap().to_str().unwrap(), exp_hash);
+        assert_eq!(cp, pkgs);
+        // Test for file with inlined pkgs
+        let protoc = Path::new("example/protoc");
+        let (cache_path, cp) = get_info_from_cando_file(protoc).unwrap();
+        assert_eq!(cache_path.file_name().unwrap().to_str().unwrap(), exp_hash);
+        assert_eq!(cp, pkgs);
+    }
+}
+
+// TODO(SS): Add integration tests as well
