@@ -431,9 +431,8 @@ mod tests {
     fn misc_test() {
         let lockfile_path = Path::new("example/my_env/env-lock.yaml");
         let pkgs = get_conda_pkgs_from_lockfile(&lockfile_path).unwrap();
-        let exp_hash = "7ca536558f6b8bfd9d39a2d7ff2d21b95fa71e4f9bd59d318a10ce71eb892394";
         // hashing function checks
-        assert_eq!(hash_conda_pkgs(&pkgs), exp_hash);
+        let exp_hash = hash_conda_pkgs(&pkgs);
         // Test for file with relative lockfiles
         let rg = Path::new("example/rg");
         let (cache_path, cp) = get_info_from_cando_file(rg).unwrap();
@@ -442,6 +441,7 @@ mod tests {
         // Test for file with inlined pkgs
         let protoc = Path::new("example/protoc");
         let (cache_path, cp) = get_info_from_cando_file(protoc).unwrap();
+        let exp_hash = "7ca536558f6b8bfd9d39a2d7ff2d21b95fa71e4f9bd59d318a10ce71eb892394";
         assert_eq!(cache_path.file_name().unwrap().to_str().unwrap(), exp_hash);
         assert_eq!(cp, pkgs);
     }
