@@ -1,4 +1,4 @@
 #!/usr/bin/env cando 
 
-lockfile: ./my_env/env-lock.yaml
-cache: /Users/satyajeet/Desktop/code/cando/target/mycache
+lockfile_path: ./my_env/env-lock.yaml
+# cache: /Users/satyajeet/Desktop/code/cando/target/mycache

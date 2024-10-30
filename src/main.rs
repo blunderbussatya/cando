@@ -1,9 +1,11 @@
-use anyhow::{anyhow, Result};
+use anyhow::anyhow;
+use clap::Parser;
+use itertools::{Itertools, Tee};
 use rattler_conda_types::Platform;
 use rattler_lock::LockFile;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::env::ArgsOs;
-use std::io::Cursor;
+use std::io::{Cursor, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use tokio_retry::strategy::ExponentialBackoff;
@@ -18,20 +20,83 @@ const ENV_DIR_NAME: &str = "__ENV__";
 const EXPONENTIAL_BACKOFF_BASE_MILLIS: u64 = 100;
 const NUM_RETRIES: usize = 5;
 const DEFAULT_CACHE_NAME: &str = ".cando_cache";
+const DEFAULT_CACHE_ENV_DIRS: [&str; 2] = ["XDG_CACHE_HOME", "HOME"];
 
-#[derive(Debug, Deserialize)]
-struct Schema {
-    /// Relative path to lockfile
-    lockfile: PathBuf,
-    /// Optinally cache path can be defined, default path is $HOME/.cando_cache
-    cache: Option<PathBuf>,
+#[derive(Debug, Deserialize, Serialize)]
+struct InlinedCondaPkgs {
+    /// Inlined data about conda pkgs needed for the current particular platform.
+    hash: String,
+    conda_pkgs: Vec<CondaPkg>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Deserialize, Serialize)]
+struct Schema {
+    /// Relative path to lockfile
+    #[serde(skip_serializing_if = "Option::is_none")]
+    lockfile_path: Option<PathBuf>,
+    /// Optinally cache path can be defined, default path is $HOME/.cando_cache
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cache: Option<PathBuf>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    inlined_conda_pkgs: Option<InlinedCondaPkgs>,
+}
+
+impl Schema {
+    fn validate_schema(&self) -> anyhow::Result<()> {
+        if self.lockfile_path.is_none() && self.inlined_conda_pkgs.is_none() {
+            Err(anyhow!(
+                "`lockfile_path` and `inlined_conda_pkgs` can't be None at the same time please specify atleast one of them"
+            ))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
 struct CondaPkg {
     name: String,
     url: url::Url,
     sha256: String,
+}
+
+#[derive(Parser, Debug)]
+struct GenerateOpts {
+    #[clap(
+        long,
+        short,
+        help = "Executable for which cando file is to be generated"
+    )]
+    bin: String,
+    #[clap(
+        long,
+        short,
+        default_value = "true",
+        help = "If set to false then it cando file depends on external lockfiles for execution"
+    )]
+    inline: bool,
+    #[clap(
+        long,
+        short,
+        default_value = ".",
+        help = "Output directory for the cando executable"
+    )]
+    output: PathBuf,
+    #[clap(long, short, help = "lockfile to be used in cando exe generation")]
+    lockfile: PathBuf,
+    #[clap(long, short, help = "Cache dir to be used by cando")]
+    cache: Option<PathBuf>,
+}
+
+#[derive(Parser, Debug)]
+enum Commands {
+    Generate(GenerateOpts),
+}
+
+#[derive(Parser, Debug)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
 }
 
 async fn download_pkg(
@@ -67,17 +132,24 @@ async fn download_pkg(
 }
 
 fn hash_conda_pkgs(pkgs: &[CondaPkg]) -> String {
-    // Hash all the pkgs to create a unique hash for the env, `get_conda_pkgs_from_lockfile` also sorts the list
+    // Hash all the pkgs to create a unique hash for the env, first sort the list
     // so hashes won't change due to changes in ordering in the lockfile
+    let mut pkgs = pkgs.to_owned();
+    pkgs.sort_by(|a, b| a.name.cmp(&b.name));
     let accum_hash = pkgs
         .iter()
         .fold("".to_owned(), |acc, c| acc + c.sha256.as_str());
     sha256::digest(accum_hash)
 }
 
-async fn install_env(pkgs: Vec<CondaPkg>, cache_path: &Path) -> anyhow::Result<PathBuf> {
-    let install_dir = cache_path.join(hash_conda_pkgs(&pkgs));
-    std::fs::create_dir_all(&install_dir)?;
+fn set_permissions_on_path(p: &Path, mask: u32) -> std::io::Result<()> {
+    let mut perms = std::fs::metadata(p)?.permissions();
+    perms.set_mode(mask);
+    std::fs::set_permissions(p, perms)
+}
+
+async fn install_env(pkgs: Vec<CondaPkg>, install_dir: &Path) -> anyhow::Result<PathBuf> {
+    std::fs::create_dir_all(install_dir)?;
     let file_lock_path = install_dir.join(LOCK_FILE_NAME);
     debug!("Waiting until we can aquire the file lock");
     let _lock_guard = named_lock::NamedLock::with_path(file_lock_path)?.lock()?;
@@ -103,10 +175,9 @@ async fn install_env(pkgs: Vec<CondaPkg>, cache_path: &Path) -> anyhow::Result<P
     }))
     .await
     .into_iter()
-    .collect::<Result<Vec<_>>>()?;
+    .collect::<anyhow::Result<Vec<_>>>()?;
 
     std::fs::create_dir_all(&env_path)?;
-
     for extracted_pkg in extracted_pkgs {
         rattler::install::link_package(
             &extracted_pkg,
@@ -119,35 +190,29 @@ async fn install_env(pkgs: Vec<CondaPkg>, cache_path: &Path) -> anyhow::Result<P
 
     std::fs::remove_dir_all(download_path)?;
     std::fs::File::create(success_marker)?;
-
     // Set RX perms for owner/group
-    let mut perms = std::fs::metadata(&env_path)?.permissions();
-    perms.set_mode(DEFAULT_FILE_PERMISSIONS);
-    tokio::fs::set_permissions(&env_path, perms).await?;
+    set_permissions_on_path(&env_path, DEFAULT_FILE_PERMISSIONS)?;
 
     Ok(env_path)
 }
 
-fn get_conda_pkgs_from_lockfile(
-    lockfile: LockFile,
-    platform: Platform,
-) -> anyhow::Result<Vec<CondaPkg>> {
+fn get_conda_pkgs_from_lockfile(lockfile_path: &Path) -> anyhow::Result<Vec<CondaPkg>> {
+    let lockfile = LockFile::from_path(lockfile_path)?;
+    let platform = Platform::current();
     if lockfile.environments().len() > 1 {
         return Err(anyhow!(
             "More than one env in the lockfile are not supported"
         ));
     }
 
-    let (_, env) = lockfile
+    let pkgs = lockfile
         .environments()
         .next()
-        .ok_or(anyhow!("No environment found in the lockfile"))?;
-
-    let env = env.conda_repodata_records()?;
-
-    let mut pkgs = env
+        .ok_or(anyhow!("No environment found in the lockfile"))?
+        .1
+        .conda_repodata_records()?
         .get(&platform)
-        .ok_or(anyhow!("Platform not found"))?
+        .ok_or(anyhow!("Platform `{platform:?}` not found"))?
         .iter()
         .map(|r| CondaPkg {
             name: r.file_name.clone(),
@@ -155,77 +220,160 @@ fn get_conda_pkgs_from_lockfile(
             sha256: format!("{:x}", r.package_record.sha256.unwrap()),
         })
         .collect::<Vec<_>>();
+
     if pkgs.is_empty() {
-        return Err(anyhow!(
+        Err(anyhow!(
             "No packages found for the current platform {platform:#?} in the lockfile"
-        ));
+        ))
+    } else {
+        Ok(pkgs)
     }
-    pkgs.sort_by(|a, b| a.name.cmp(&b.name));
-    Ok(pkgs)
 }
 
-fn get_info_from_cando_file(cando_file_path: &Path) -> anyhow::Result<(PathBuf, PathBuf)> {
-    let Schema { lockfile, cache }: Schema = {
+fn get_info_from_cando_file(cando_file_path: &Path) -> anyhow::Result<(PathBuf, Vec<CondaPkg>)> {
+    let cando_schema: Schema = {
         let content = std::fs::read_to_string(cando_file_path)?;
         serde_yaml::from_str(&content)?
     };
 
-    let lockfile_path = {
-        let mut cando_file = PathBuf::from(cando_file_path);
-        // remove the cando exe name itself from the path
-        if !cando_file.pop() {
-            return Err(anyhow!("Invalid file exec path {cando_file:#?}"));
+    cando_schema.validate_schema()?;
+
+    let Schema {
+        lockfile_path,
+        cache,
+        inlined_conda_pkgs,
+    } = cando_schema;
+
+    let (hash, conda_pkgs) = match inlined_conda_pkgs {
+        Some(InlinedCondaPkgs { hash, conda_pkgs }) => (hash, conda_pkgs),
+        None => {
+            let lockfile_abs_path = {
+                let mut cando_file = PathBuf::from(cando_file_path);
+                // remove the cando exe name itself from the path
+                if !cando_file.pop() {
+                    return Err(anyhow!("Invalid file exec path {cando_file:#?}"));
+                }
+                // unwrap is safe here as we've already validated the schema above and its guaranteed that
+                // lockfil_path is not none
+                cando_file.join(lockfile_path.unwrap()).canonicalize()?
+            };
+            let conda_pkgs = get_conda_pkgs_from_lockfile(&lockfile_abs_path)?;
+            (hash_conda_pkgs(&conda_pkgs), conda_pkgs)
         }
-        cando_file.join(lockfile).canonicalize()?
     };
 
-    let cache_path = match cache {
+    let cache_dir = match cache {
         Some(cache_path) => cache_path,
         None => {
-            let home = std::env::var_os("HOME").ok_or(anyhow!(
-                "HOME env var unset, consider setting it or set the cachedir param in cando file"
-            ))?;
-            PathBuf::from(home).join(DEFAULT_CACHE_NAME)
+            // We prefer XDG_CACHE_HOME but fallback to HOME if it isn't set (like in macos).
+            let cache_env_dir = DEFAULT_CACHE_ENV_DIRS
+                .iter()
+                .filter_map(std::env::var_os)
+                .next()
+                .ok_or(anyhow!(
+                    "XDG_CACHE_HOME/HOME env var unset, consider setting one 
+                of them or set the cachedir param in cando file"
+                ))?;
+
+            PathBuf::from(cache_env_dir).join(DEFAULT_CACHE_NAME)
         }
     };
 
-    Ok((lockfile_path, cache_path))
+    let cache_path = cache_dir.join(hash);
+
+    Ok((cache_path, conda_pkgs))
 }
 
-async fn run_cando(mut args: ArgsOs) -> anyhow::Result<()> {
-    if let Some(file_arg) = args.nth(1) {
-        let cando_file_path = PathBuf::from(&file_arg);
-        let (lockfile_path, cache_path) = get_info_from_cando_file(&cando_file_path)?;
-        let conda_pkgs = get_conda_pkgs_from_lockfile(
-            LockFile::from_path(&lockfile_path)?,
-            Platform::current(),
-        )?;
+async fn get_exe_from_cando_file(cando_file_path: &Path) -> anyhow::Result<PathBuf> {
+    if !cando_file_path.try_exists()? {
+        return Err(anyhow!("Cando file {cando_file_path:#?} doesn't exist"));
+    }
+    let (cache_path, conda_pkgs) = get_info_from_cando_file(cando_file_path)?;
+    let env_path = install_env(conda_pkgs, &cache_path).await?;
+    let exe_name = cando_file_path
+        .file_name()
+        .ok_or(anyhow!("Invalid cando filename {cando_file_path:#?}"))?;
+    let exe_path = env_path.join("bin").join(exe_name);
+    if !exe_path.try_exists()? {
+        Err(anyhow!(
+            "Executable {exe_name:#?} doesn't exist in the given env,
+            rename the cando file and set it to the correct exe name"
+        ))
+    } else {
+        Ok(exe_path)
+    }
+}
 
-        let exe_path = {
-            let env_path = install_env(conda_pkgs, &cache_path).await?;
-            let exe_name = cando_file_path
-                .file_name()
-                .ok_or(anyhow!("Invalid cando filename {cando_file_path:#?}"))?;
-            let exe_path = env_path.join("bin").join(exe_name);
-            if !exe_path.try_exists()? {
-                return Err(anyhow!(
-                    "Executable {exe_name:#?} doesn't exist in the given env,
-                    rename the cando file and set it to the correct exe name"
-                ));
-            }
-            exe_path
-        };
-
-        let mut command = std::process::Command::new(exe_path);
-        command.args(args);
+async fn try_exec_with_args(mut exec_args: Tee<ArgsOs>) -> anyhow::Result<()> {
+    if let Some(file_arg) = exec_args.nth(1) {
+        let exe = get_exe_from_cando_file(Path::new(&file_arg)).await?;
+        debug!("executable path: {exe:#?}");
+        let mut command = std::process::Command::new(exe);
+        command.args(exec_args);
         std::os::unix::process::CommandExt::arg0(&mut command, file_arg);
         let exec_error = std::os::unix::process::CommandExt::exec(&mut command);
-        return Err(anyhow!(
+        Err(anyhow!(
             "Unable to call exec the binary, error: {exec_error:#?}"
-        ));
+        ))
+    } else {
+        Ok(())
     }
+}
 
+fn handle_cli(cli: Cli) -> anyhow::Result<()> {
+    match cli.command {
+        Commands::Generate(GenerateOpts {
+            bin,
+            inline,
+            output,
+            lockfile,
+            cache,
+        }) => {
+            let conda_pkgs = get_conda_pkgs_from_lockfile(&lockfile)?;
+            let hash = hash_conda_pkgs(&conda_pkgs);
+            let lockfile_path = Some(lockfile);
+            let inlined_conda_pkgs = {
+                if inline {
+                    Some(InlinedCondaPkgs { hash, conda_pkgs })
+                } else {
+                    None
+                }
+            };
+            let cando_file = Schema {
+                lockfile_path,
+                cache,
+                inlined_conda_pkgs,
+            };
+            let cando_file_str = format!(
+                "#!/usr/bin/env cando\n\n{}",
+                serde_yaml::to_string(&cando_file)?
+            );
+            let output_file_path = output.join(bin);
+            let mut output_file = std::fs::File::create(&output_file_path)?;
+            output_file.write_all(cando_file_str.as_bytes())?;
+            set_permissions_on_path(&output_file_path, DEFAULT_FILE_PERMISSIONS)?;
+        }
+    }
     Ok(())
+}
+
+async fn run_cando(args: ArgsOs) -> anyhow::Result<()> {
+    let (exec_args, clap_args) = args.into_iter().tee();
+    match try_exec_with_args(exec_args).await {
+        Err(exec_error) => {
+            debug!("Exec failed with error: {exec_error} trying to run cli instead");
+            match Cli::try_parse_from(clap_args) {
+                Ok(cli) => handle_cli(cli),
+                Err(cli_error) => Err(anyhow!(
+                    "`{cli_error}` \n and exec'ing failed due to: `{exec_error:#?}`"
+                )),
+            }
+        }
+        Ok(_) => {
+            debug!("Cando (exec) execution successful");
+            Ok(())
+        }
+    }
 }
 
 #[tokio::main]

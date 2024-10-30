@@ -27,6 +27,14 @@ lockfile: ../con_exec/src/env-lock.yaml
 cache: /Users/satyajeet/Desktop/code/con_exec/target/mycache
 ```
 
+4. You can also generate cando executables using `cando generate`
+
+The protoc file generated in examples dir was done using:
+```bash
+cando generate --bin protoc --lockfile example/my_env/env-lock.yaml --output ./example/
+```
+TODO(SS): Add more detailed docs
+
 Debug Mode: In case of issues you can use cando in debug mode by setting the env var `CANDO_DEBUG=1`.
 
 ## What's with the name `cando`?
