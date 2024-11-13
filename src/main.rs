@@ -1,15 +1,18 @@
 use anyhow::anyhow;
 use clap::Parser;
 use itertools::{Itertools, Tee};
-use rattler_conda_types::Platform;
+use rattler::install::{InstallOptions, PythonInfo};
+use rattler_conda_types::{Platform, Version};
 use rattler_lock::LockFile;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::env::ArgsOs;
 use std::io::{Cursor, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use tokio_retry::strategy::ExponentialBackoff;
-use tracing::{debug, Level};
+use tracing::{debug, warn, Level};
 
 // RX for both owner and group
 const DEFAULT_FILE_PERMISSIONS: u32 = 0o550;
@@ -94,6 +97,7 @@ enum Commands {
 }
 
 #[derive(Parser, Debug)]
+#[command(version = env!("CARGO_PKG_VERSION"), author = env!("CARGO_PKG_AUTHORS"), about = "Lightweight conda binary executable framework")]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -148,6 +152,21 @@ fn set_permissions_on_path(p: &Path, mask: u32) -> std::io::Result<()> {
     std::fs::set_permissions(p, perms)
 }
 
+fn get_py_version(pkgs: &[CondaPkg]) -> Option<Version> {
+    let re = Regex::new(r"python-(\d+)\.(\d+)\.(\d+).*$").unwrap();
+    for CondaPkg { name, .. } in pkgs {
+        if let Some(captures) = re.captures(name) {
+            let major = captures.get(1).map_or("", |m| m.as_str());
+            let minor = captures.get(2).map_or("", |m| m.as_str());
+            let patch = captures.get(3).map_or("", |m| m.as_str());
+            if let Ok(v) = Version::from_str(&format!("{major}.{minor}.{patch}")) {
+                return Some(v);
+            }
+        }
+    }
+    None
+}
+
 async fn install_env(pkgs: Vec<CondaPkg>, install_dir: &Path) -> anyhow::Result<PathBuf> {
     std::fs::create_dir_all(install_dir)?;
     let file_lock_path = install_dir.join(LOCK_FILE_NAME);
@@ -160,6 +179,15 @@ async fn install_env(pkgs: Vec<CondaPkg>, install_dir: &Path) -> anyhow::Result<
     if success_marker.try_exists()? {
         return Ok(env_path);
     }
+
+    let python_info = match get_py_version(&pkgs) {
+        Some(v) => match PythonInfo::from_version(&v, Platform::current()) {
+            Ok(python_info) => Some(python_info),
+            Err(_) => None,
+        },
+        None => None,
+    };
+    debug!("PythonInfo : {python_info:#?}");
 
     let download_path = install_dir.join("downloads");
     std::fs::create_dir_all(&download_path)?;
@@ -177,15 +205,27 @@ async fn install_env(pkgs: Vec<CondaPkg>, install_dir: &Path) -> anyhow::Result<
     .into_iter()
     .collect::<anyhow::Result<Vec<_>>>()?;
 
-    std::fs::create_dir_all(&env_path)?;
+    let install_opts = InstallOptions {
+        python_info,
+        ..Default::default()
+    };
+
+    // Linking one by one but we can do this parallely as well if its that big of a deal
     for extracted_pkg in extracted_pkgs {
-        rattler::install::link_package(
+        let linked_files = rattler::install::link_package(
             &extracted_pkg,
             &env_path,
             &Default::default(),
-            Default::default(),
+            install_opts.clone(),
         )
         .await?;
+
+        linked_files.into_iter().for_each(|f| {
+            // original_path is only set when clobbering takes place
+            if let Some(file) = f.original_path {
+                warn!("File {file:?} was clobbered while linking pkgs");
+            }
+        });
     }
 
     std::fs::remove_dir_all(download_path)?;
@@ -296,7 +336,7 @@ async fn get_exe_from_cando_file(cando_file_path: &Path) -> anyhow::Result<PathB
     let exe_path = env_path.join("bin").join(exe_name);
     if !exe_path.try_exists()? {
         Err(anyhow!(
-            "Executable {exe_name:#?} doesn't exist in the given env,
+            "Executable {exe_name:#?} doesn't exist in the env {env_path:?},
             rename the cando file and set it to the correct exe name"
         ))
     } else {
@@ -358,6 +398,7 @@ fn handle_cli(cli: Cli) -> anyhow::Result<()> {
             let mut output_file = std::fs::File::create(&output_file_path)?;
             output_file.write_all(cando_file_str.as_bytes())?;
             set_permissions_on_path(&output_file_path, DEFAULT_FILE_PERMISSIONS)?;
+            println!("Cando file {output_file_path:?} generated successfully!");
         }
     }
     Ok(())
@@ -425,6 +466,13 @@ mod tests {
             invalid_schema.validate_schema().is_err(),
             "Schema validation should fail"
         );
+    }
+
+    #[test]
+    fn test_get_python_version() {
+        let bz = Path::new("example/bunzip2");
+        let (_, pkgs) = get_info_from_cando_file(bz).unwrap();
+        get_py_version(&pkgs).unwrap();
     }
 
     #[test]

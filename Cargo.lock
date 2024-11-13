@@ -435,6 +435,7 @@ dependencies = [
  "rattler_conda_types",
  "rattler_lock",
  "rattler_package_streaming",
+ "regex",
  "reqwest 0.12.8",
  "serde",
  "serde_yaml",

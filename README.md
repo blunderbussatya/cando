@@ -24,18 +24,23 @@ A cando file from example containing information for running rg
 # Path relative to the directory in which this cando file exists
 lockfile: ../con_exec/src/env-lock.yaml
 # Optional absolute path to the cache directory which cando should use
-cache: /Users/satyajeet/Desktop/code/con_exec/target/mycache
+# it defaults to using XDG_CACHE_HOME/HOME env vars for getting the cache directory
+# cache: /Users/satyajeet/Desktop/code/con_exec/target/mycache
 ```
 
 4. You can also generate cando executables using `cando generate`
 
 The protoc file generated in examples dir was done using:
+
 ```bash
 cando generate --bin protoc --lockfile example/my_env/env-lock.yaml --output ./example/
 ```
-TODO(SS): Add more detailed docs
 
 Debug Mode: In case of issues you can use cando in debug mode by setting the env var `CANDO_DEBUG=1`.
+
+## Self contained python (possibly anything) scripts
+
+You can look at the script in `example/standalone_py_script/script.py` the shebang in this script uses the python binary contained inside this directory itself i.e. `example/standalone_py_script/python` which is a cando binary. This cando binary has a conda environment which contains all packges like matplotlib, scipy, numpy which our script uses.
 
 ## What's with the name `cando`?
 
@@ -51,6 +56,7 @@ micromamba create -n my_env -f some_env.yaml -y
 micromamba activate my_env
 ## Run you binary contained in the env
 ```
+
 As you can see this is much more tedious then just running the binary directly. There are several other problems which I've faced as well. Lets assume you want to run 2 binaries and their packages are incompatible ie you can't install their pkgs in one env, in this can you'd have to create 2 different envs and then either activate them one by one or use binaries from the env manually which is tedious. There are many such issues on similar lines and cando helps us solve them.
 
 
