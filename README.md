@@ -36,7 +36,40 @@ The protoc file generated in examples dir was done using:
 cando generate --bin protoc --lockfile example/my_env/env-lock.yaml --output ./example/
 ```
 
-Debug Mode: In case of issues you can use cando in debug mode by setting the env var `CANDO_DEBUG=1`.
+An example of self-sufficient cando executable:
+
+```yaml
+#!/usr/bin/env cando
+
+inlined_conda_pkgs:
+  hash: 7ca536558f6b8bfd9d39a2d7ff2d21b95fa71e4f9bd59d318a10ce71eb892394
+  conda_pkgs:
+  - name: ca-certificates-2024.8.30-hf0a4a13_0.conda
+    url: https://conda.anaconda.org/conda-forge/osx-arm64/ca-certificates-2024.8.30-hf0a4a13_0.conda
+    sha256: 2db1733f4b644575dbbdd7994a8f338e6ef937f5ebdb74acd557e9dda0211709
+  - name: libabseil-20240722.0-cxx17_hf9b8971_1.conda
+    url: https://conda.anaconda.org/conda-forge/osx-arm64/libabseil-20240722.0-cxx17_hf9b8971_1.conda
+    sha256: 90bf08a75506dfcf28a70977da8ab050bcf594cd02abd3a9d84a22c9e8161724
+  - name: libcxx-19.1.2-ha82da77_0.conda
+    url: https://conda.anaconda.org/conda-forge/osx-arm64/libcxx-19.1.2-ha82da77_0.conda
+    sha256: 9c714110264f4fe824d40e11ad39b0eda65251f87826c81f4d67ccf8a3348d29
+  - name: libprotobuf-5.28.3-h8f0b736_0.conda
+    url: https://conda.anaconda.org/conda-forge/osx-arm64/libprotobuf-5.28.3-h8f0b736_0.conda
+    sha256: d95a239216db16ff5cac10be45c11afd2b1bb5dd17c9f3cabb35c6dd2f2f13fd
+  - name: libzlib-1.3.1-h8359307_2.conda
+    url: https://conda.anaconda.org/conda-forge/osx-arm64/libzlib-1.3.1-h8359307_2.conda
+    sha256: ce34669eadaba351cd54910743e6a2261b67009624dbc7daeeafdef93616711b
+  - name: openssl-3.3.2-h8359307_0.conda
+    url: https://conda.anaconda.org/conda-forge/osx-arm64/openssl-3.3.2-h8359307_0.conda
+    sha256: 940fa01c4dc6152158fe8943e05e55a1544cab639df0994e3b35937839e4f4d1
+  - name: ripgrep-14.1.1-h0ef69ab_0.conda
+    url: https://conda.anaconda.org/conda-forge/osx-arm64/ripgrep-14.1.1-h0ef69ab_0.conda
+    sha256: bea65d7f355ac3db84b046e2db3b203d78ac261451bf5dd7a5719fc8102fa73e
+```
+
+PRO-TIP: You can symlink the same cando file to different executables contained in the conda environment. That is if protoc and rg were in the same conda environment you can simple run cando generate once to create a cando executable and symlink protoc and rg to that and it'd work as expected.
+
+*Debug Mode:* In case of issues you can use cando in debug mode by setting the env var `CANDO_DEBUG=1`.
 
 ## Self contained python (possibly anything) scripts
 
