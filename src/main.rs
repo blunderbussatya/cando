@@ -193,8 +193,9 @@ async fn install_env(pkgs: Vec<CondaPkg>, install_dir: &Path) -> anyhow::Result<
     std::fs::create_dir_all(&download_path)?;
 
     let client = reqwest::Client::new();
-    let retry_strategy =
-        ExponentialBackoff::from_millis(EXPONENTIAL_BACKOFF_BASE_MILLIS).take(NUM_RETRIES);
+    let retry_strategy = ExponentialBackoff::from_millis(EXPONENTIAL_BACKOFF_BASE_MILLIS)
+        .factor(2)
+        .take(NUM_RETRIES);
 
     let extracted_pkgs = futures::future::join_all(pkgs.iter().map(|c| {
         tokio_retry::Retry::spawn(retry_strategy.clone(), || {
